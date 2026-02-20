@@ -1,0 +1,113 @@
+name: Shared Repository Linting
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: 'Directory to check'
+        required: false
+        type: string
+        default: '.'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Run Lint Checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # 📝 Newline Check
+      # ----------------------------------------------------------------
+      - name: Check for trailing newlines
+        run: |
+          FAILED=0
+          
+          for file in $(git grep -Il ''); do
+            if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l)" -eq 0 ]; then
+              echo "❌ Missing trailing newline: $file"
+              FAILED=1
+            fi
+          done
+          
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "Some files are missing a trailing newline. Please add an empty line to the end of the files listed above."
+            exit 1
+          else
+            echo "✅ All text files end with a proper newline."
+          fi
+
+      # ----------------------------------------------------------------
+      # 🚀 Future Check Placeholders
+      # ----------------------------------------------------------------
+      # - name: Check Markdown formatting
+      #   run: |
+      #     echo "Markdown linting goes here"
+      
+      # - name: Check Shell scripts (shellcheck)
+      #   run: |
+      #     echo "Shell script linting goes here"
+
+      # ----------------------------------------------------------------
+      # 🛑 YAML Extension Check
+      # ----------------------------------------------------------------
+      - name: Enforce .yml extension
+        run: |
+          # Fetch tracked files ending in .yaml
+          YAML_FILES=$(git ls-files '*.yaml')
+          
+          if [ -n "$YAML_FILES" ]; then
+            echo "❌ Found files with the '.yaml' extension. Please rename them to use '.yml' instead:"
+            echo "$YAML_FILES"
+            exit 1
+          else
+            echo "✅ All YAML files use the correct '.yml' extension."
+          fi
+
+      # ----------------------------------------------------------------
+      # 📖 Spell Check (Markdown files)
+      # ----------------------------------------------------------------
+      - name: Run cspell on Markdown
+        run: |
+          echo "Running spellcheck on all Markdown files..."
+          # The --no-progress flag keeps the CI logs clean
+          npx cspell "**/*.md" --no-progress
+          
+
+      - name: Run Markdown Lint
+        run: |
+          echo "Linting Markdown formatting..."
+          npx markdownlint-cli "**/*.md" --ignore "node_modules"
+
+      # ----------------------------------------------------------------
+      # 📖 Spell Check (Markdown files)
+      # ----------------------------------------------------------------
+      - name: Run cspell on Markdown
+        run: |
+          echo "Running spellcheck on all Markdown files..."
+          npx cspell "**/*.md" --no-progress
+
+      - name: Run tofu fmt check
+        id: fmt
+        run: |
+          echo "Running tofu fmt -recursive -check..."
+          if tofu fmt -recursive -check; then
+            echo "✅ All OpenTofu files are properly formatted"
+            exit 0
+          else
+            echo "❌ Format check failed. Please run 'tofu fmt -recursive' to fix formatting issues."
+            echo ""
+            echo "The following files need formatting:"
+            # Use || true so the diff command doesn't crash the script before exiting 1
+            tofu fmt -recursive -check -diff || true
+            exit 1
+          fi
