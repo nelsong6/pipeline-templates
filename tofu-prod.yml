@@ -1,0 +1,33 @@
+name: Tofu
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'OpenTofu action to perform'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+  push:
+    branches: ['main']
+    paths:
+      - 'tofu/**'
+  pull_request:
+    branches: ['main']
+    paths:
+      - 'tofu/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-infra:
+    uses: nelsong6/pipeline-templates/.github/workflows/tofu-prod-template.yml@main
+    with:
+      action: ${{ github.event.inputs.action || 'apply' }}
+    secrets: inherit
