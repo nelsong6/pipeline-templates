@@ -1,0 +1,20 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "azurerm",
+    "cspell",
+    "ghcr",
+    "OIDC",
+    "OpenTofu",
+    "passwordless",
+    "tfplan",
+    "tfstate",
+    "tfvars",
+    "Vite"
+  ],
+  "ignorePaths": [
+    "node_modules/**",
+    "dist/**"
+  ]
+}
