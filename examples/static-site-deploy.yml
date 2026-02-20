@@ -26,7 +26,5 @@ jobs:
   frontend-pipeline:
     uses: nelsong6/shared-workflows/.github/workflows/master-frontend-deploy.yml@main
     with:
-      frontend_directory: './frontend'
-      tofu_directory: './tofu'
       node_version: '20.x'
     secrets: inherit

@@ -111,3 +111,45 @@ jobs:
             tofu fmt -recursive -check -diff || true
             exit 1
           fi
+
+      # ----------------------------------------------------------------
+      # 📋 Markdown Lint
+      # ----------------------------------------------------------------
+      - name: Run Markdown Lint
+        run: |
+          echo "Linting Markdown formatting..."
+          npx markdownlint-cli "**/*.md" --ignore "node_modules"
+
+      # ----------------------------------------------------------------
+      # 🔤 Filename Check (No Underscores)
+      # ----------------------------------------------------------------
+      - name: Enforce no underscores in filenames
+        run: |
+          # Add any filenames, directories, or patterns to ignore below.
+          # Place one pattern per line.
+          IGNORE_LIST=$(cat << 'EOF'
+          PULL_REQUEST_TEMPLATE
+          ISSUE_TEMPLATE
+          EOF
+          )
+          
+          # Automatically convert the multi-line list into a regex pattern (Pattern1|Pattern2)
+          IGNORE_PATTERN=$(echo "$IGNORE_LIST" | grep -v '^$' | paste -sd '|' -)
+          
+          # If no files have underscores, exit successfully
+          if [ -z "$UNDERSCORE_FILES" ]; then
+            echo "✅ All filenames are free of underscores."
+            exit 0
+          fi
+          
+          # Filter out the ignored files using the pattern above
+          FAILED_FILES=$(echo "$UNDERSCORE_FILES" | grep -vE "$IGNORE_PATTERN" || true)
+          
+          # If any files are left in the list after filtering, fail the build
+          if [ -n "$(echo "$FAILED_FILES" | grep -v '^$')" ]; then
+            echo "❌ Found files with underscores in their names. Please rename them to use hyphens (-) instead:"
+            echo "$FAILED_FILES"
+            exit 1
+          else
+            echo "✅ All non-ignored filenames are free of underscores."
+          fi
