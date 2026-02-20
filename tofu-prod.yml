@@ -16,6 +16,7 @@ on:
     branches: ['**']
     paths:
       - 'tofu/**'
+      - '.github/workflows/tofu-prod.yml'
   pull_request:
     branches: ['**']
     paths:
