@@ -1,0 +1,32 @@
+name: Deploy Frontend App
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+  workflow_dispatch:
+  workflow_call: # Required so the Tofu pipeline can trigger it
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: write   # Required to push tags
+  pull-requests: write
+
+jobs:
+  frontend-pipeline:
+    uses: nelsong6/shared-workflows/.github/workflows/master-frontend-deploy.yml@main
+    with:
+      frontend_directory: './frontend'
+      tofu_directory: './tofu'
+      node_version: '20.x'
+    secrets: inherit

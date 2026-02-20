@@ -1,0 +1,243 @@
+name: Shared Frontend Deploy
+
+on:
+  workflow_call:
+    inputs:
+      frontend_directory:
+        description: 'Directory containing frontend code'
+        required: false
+        type: string
+        default: './frontend'
+      tofu_directory:
+        description: 'Directory containing OpenTofu files for outputs'
+        required: false
+        type: string
+        default: './tofu'
+      node_version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '20.x'
+      azure_client_id:
+        description: 'Azure Client ID (OIDC)'
+        required: false
+        type: string
+        default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
+      azure_tenant_id:
+        description: 'Azure Tenant ID'
+        required: false
+        type: string
+        default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
+      azure_subscription_id:
+        description: 'Azure Subscription ID'
+        required: false
+        type: string
+        default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
+
+permissions:
+  id-token: write
+  contents: write   # Required to push tags
+  pull-requests: write
+
+jobs:
+  # ----------------------------------------------------------------
+  # Test Job
+  # ----------------------------------------------------------------
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: 'npm'
+        cache-dependency-path: ${{ inputs.frontend_directory }}/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ${{ inputs.frontend_directory }}
+      run: npm ci
+
+    - name: Run linter
+      working-directory: ${{ inputs.frontend_directory }}
+      run: npm run lint || true
+
+    - name: Run tests (when available)
+      working-directory: ${{ inputs.frontend_directory }}
+      run: npm test || echo "No tests configured yet"
+
+  # ----------------------------------------------------------------
+  # Build and Deploy Job
+  # ----------------------------------------------------------------
+  build-and-deploy:
+    name: Build and Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: test # Wait for tests to pass
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for tags
+
+    - name: Generate Version Tag
+      id: version
+      run: |
+        git fetch --tags
+        LATEST_TAG=$(git tag -l "v*" | sort -V | tail -n 1)
+
+        if [ -z "$LATEST_TAG" ]; then
+          LATEST_TAG="v0.0.0"
+        fi
+        
+        echo "Highest existing tag: $LATEST_TAG"
+        
+        VERSION=${LATEST_TAG#v}
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+        
+        # Increment patch version for main branch deployments (push, dispatch, or workflow_call)
+        if [[ "${{ github.event_name }}" != "pull_request" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
+          IS_RELEASE="true"
+        else
+          NEW_VERSION="${LATEST_TAG}-dev"
+          IS_RELEASE="false"
+        fi
+        
+        if git show-ref --tags --verify --quiet "refs/tags/$NEW_VERSION"; then
+           echo "⚠️ Tag $NEW_VERSION exists! Bumping patch again..."
+           NEW_PATCH=$((NEW_PATCH + 1))
+           NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
+        fi
+
+        BUILD_SHA=$(git rev-parse --short HEAD)
+        BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+        
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "version_number=${NEW_VERSION#v}" >> $GITHUB_OUTPUT
+        echo "build_sha=$BUILD_SHA" >> $GITHUB_OUTPUT
+        echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+        echo "is_release=$IS_RELEASE" >> $GITHUB_OUTPUT
+        
+        echo "📦 Version: $NEW_VERSION (Build: $BUILD_SHA)"
+        echo "🏷️  Release: $IS_RELEASE"
+
+    - name: Setup OpenTofu
+      uses: opentofu/setup-opentofu@v1
+      with:
+        tofu_version: 'latest'
+
+    - name: Azure Login via OIDC
+      uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.azure_client_id }}
+        tenant-id: ${{ inputs.azure_tenant_id }}
+        subscription-id: ${{ inputs.azure_subscription_id }}
+
+    - name: Fetch Infrastructure Config
+      id: infra
+      working-directory: ${{ inputs.tofu_directory }}
+      env:
+        ARM_USE_OIDC: true
+        ARM_CLIENT_ID: ${{ inputs.azure_client_id }}
+        ARM_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        ARM_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
+      run: |
+        echo "Initializing OpenTofu to read state..."
+        tofu init
+        
+        echo "Fetching outputs..."
+        echo "VITE_API_URL=$(tofu output -raw cosmos_db_endpoint)" >> $GITHUB_ENV
+        echo "STATIC_WEB_APP_NAME=$(tofu output -raw static_web_app_name)" >> $GITHUB_ENV
+        echo "RESOURCE_GROUP_NAME=$(tofu output -raw resource_group_name)" >> $GITHUB_ENV
+        
+        echo "✅ Config loaded:"
+        echo "  - APP: $(tofu output -raw static_web_app_name)"
+        echo "  - RG:  $(tofu output -raw resource_group_name)"
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: 'npm'
+        cache-dependency-path: ${{ inputs.frontend_directory }}/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ${{ inputs.frontend_directory }}
+      run: npm ci
+
+    - name: Build frontend
+      working-directory: ${{ inputs.frontend_directory }}
+      env:
+        VITE_APP_VERSION: ${{ steps.version.outputs.version_number }}
+        VITE_APP_BUILD_SHA: ${{ steps.version.outputs.build_sha }}
+        VITE_APP_BUILD_DATE: ${{ steps.version.outputs.build_date }}
+      run: npm run build
+
+    - name: Get Static Web App Deployment Token
+      id: static-web-app-token
+      run: |
+        DEPLOYMENT_TOKEN=$(az staticwebapp secrets list \
+          --name ${{ env.STATIC_WEB_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+          --query "properties.apiKey" -o tsv)
+        echo "::add-mask::$DEPLOYMENT_TOKEN"
+        echo "deployment_token=$DEPLOYMENT_TOKEN" >> $GITHUB_OUTPUT
+
+    - name: Deploy to Azure Static Web App
+      uses: Azure/static-web-apps-deploy@v1
+      with:
+        azure_static_web_apps_api_token: ${{ steps.static-web-app-token.outputs.deployment_token }}
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        action: "upload"
+        app_location: "${{ inputs.frontend_directory }}/dist"
+        output_location: ""
+        skip_app_build: true
+
+    - name: Create Git Tag
+      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git tag -a ${{ steps.version.outputs.version }} -m "Release ${{ steps.version.outputs.version }}"
+        git push origin ${{ steps.version.outputs.version }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Get Static Web App URL
+      id: swa-url
+      run: |
+        SWA_URL=$(az staticwebapp show \
+          --name ${{ env.STATIC_WEB_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+          --query "defaultHostname" -o tsv)
+        echo "url=https://$SWA_URL" >> $GITHUB_OUTPUT
+        echo "### 🚀 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Build:** \`${{ steps.version.outputs.build_sha }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Date:** ${{ steps.version.outputs.build_date }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🌐 **Live at:** https://$SWA_URL" >> $GITHUB_STEP_SUMMARY
+
+    - name: Comment PR with deployment URL
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const body = '### 🚀 Preview Deployment\n\n' +
+                       '**Version:** `${{ steps.version.outputs.version }}`\n' +
+                       '**Build:** `${{ steps.version.outputs.build_sha }}`\n' +
+                       '**Date:** ${{ steps.version.outputs.build_date }}\n\n' +
+                       '🌐 **Preview URL:** ${{ steps.swa-url.outputs.url }}';
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });

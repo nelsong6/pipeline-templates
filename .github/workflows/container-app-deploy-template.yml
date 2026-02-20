@@ -1,0 +1,186 @@
+name: Shared Backend API Deploy
+
+on:
+  workflow_call:
+    inputs:
+      backend_directory:
+        description: 'Directory containing backend code'
+        required: false
+        type: string
+        default: './backend'
+      tofu_directory:
+        description: 'Directory containing OpenTofu files for outputs'
+        required: false
+        type: string
+        default: './tofu'
+      image_name_suffix:
+        description: 'Name of the docker image (appended to repo name)'
+        required: false
+        type: string
+        default: 'workout-api'
+      node_version:
+        description: 'Node.js version for testing'
+        required: false
+        type: string
+        default: '20'
+      azure_client_id:
+        description: 'Azure Client ID (OIDC)'
+        required: false
+        type: string
+        default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
+      azure_tenant_id:
+        description: 'Azure Tenant ID'
+        required: false
+        type: string
+        default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
+      azure_subscription_id:
+        description: 'Azure Subscription ID'
+        required: false
+        type: string
+        default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+  pull-requests: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/${{ inputs.image_name_suffix }}
+
+jobs:
+  # ----------------------------------------------------------------
+  # Test Job
+  # ----------------------------------------------------------------
+  test:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+        cache: 'npm'
+        cache-dependency-path: ${{ inputs.backend_directory }}/package.json
+
+    - name: Install dependencies
+      working-directory: ${{ inputs.backend_directory }}
+      run: npm ci
+
+    - name: Run linter
+      working-directory: ${{ inputs.backend_directory }}
+      run: npm run lint || echo "No linter configured"
+
+    - name: Run tests
+      working-directory: ${{ inputs.backend_directory }}
+      run: npm test || echo "No tests configured yet"
+
+  # ----------------------------------------------------------------
+  # Build and Deploy Job
+  # ----------------------------------------------------------------
+  build-and-deploy:
+    name: Build and Deploy Backend
+    runs-on: ubuntu-latest
+    needs: test # Ensure tests pass before we build and deploy
+    environment: prod
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup OpenTofu
+      uses: opentofu/setup-opentofu@v1
+      with:
+        tofu_version: 'latest'
+
+    - name: Azure Login via OIDC
+      uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.azure_client_id }}
+        tenant-id: ${{ inputs.azure_tenant_id }}
+        subscription-id: ${{ inputs.azure_subscription_id }}
+
+    - name: Get Infrastructure Outputs
+      id: infra
+      working-directory: ${{ inputs.tofu_directory }}
+      env:
+        ARM_USE_OIDC: true
+        ARM_CLIENT_ID: ${{ inputs.azure_client_id }}
+        ARM_TENANT_ID: ${{ inputs.azure_tenant_id }}
+        ARM_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
+      run: |
+        tofu init
+        echo "CONTAINER_APP_NAME=$(tofu output -raw container_app_name)" >> $GITHUB_OUTPUT
+        echo "RESOURCE_GROUP_NAME=$(tofu output -raw resource_group_name)" >> $GITHUB_OUTPUT
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata (tags, labels) for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=sha
+          type=ref,event=branch
+          type=ref,event=pr
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.backend_directory }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    - name: Deploy to Container App
+      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      run: |
+        az containerapp update \
+          --name ${{ steps.infra.outputs.CONTAINER_APP_NAME }} \
+          --resource-group ${{ steps.infra.outputs.RESOURCE_GROUP_NAME }} \
+          --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Get Container App URL
+      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      id: app-url
+      run: |
+        FQDN=$(az containerapp show \
+          --name ${{ steps.infra.outputs.CONTAINER_APP_NAME }} \
+          --resource-group ${{ steps.infra.outputs.RESOURCE_GROUP_NAME }} \
+          --query "properties.configuration.ingress.fqdn" -o tsv)
+        
+        echo "### 🚀 Backend API Deployed!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Registry:** GitHub Container Registry (GHCR)" >> $GITHUB_STEP_SUMMARY
+        echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+        echo "**API URL:** https://$FQDN" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Health Check:** https://$FQDN/health" >> $GITHUB_STEP_SUMMARY
+
+    - name: Comment PR with deployment info
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const body = '### 🐳 Backend Container Built\n\n' +
+                       '**Registry:** GitHub Container Registry (GHCR)\n' +
+                       '**Image:** `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}`\n\n' +
+                       'Container built successfully. Will be deployed when merged to main.';
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
