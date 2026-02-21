@@ -133,6 +133,23 @@ jobs:
         name: tfplan
         path: ${{ inputs.working_directory }}/tfplan
 
+
+    - name: Plan Summary
+      if: always()
+      run: |
+        echo "## OpenTofu Plan" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ -f plan_output.txt ]; then
+          echo "<details><summary>View full plan output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```hcl' >> $GITHUB_STEP_SUMMARY
+          cat plan_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "_No plan output file found._" >> $GITHUB_STEP_SUMMARY
+        fi
+
     - name: Comment PR with Plan
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
