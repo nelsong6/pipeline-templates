@@ -79,6 +79,13 @@ jobs:
         path: ~/.tofu.d/plugin-cache
         key: ${{ runner.os }}-tofu-${{ hashFiles('**/.terraform.lock.hcl') }}
 
+    - name: Generate OIDC Token for Infisical
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const token = await core.getIDToken('https://github.com/nelsong6');
+          core.exportVariable('GITHUB_OIDC_TOKEN', token);
+
     - name: OpenTofu Init
       env:
         TF_PLUGIN_CACHE_DIR: ~/.tofu.d/plugin-cache
