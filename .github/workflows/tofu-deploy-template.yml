@@ -70,13 +70,19 @@ jobs:
         tenant-id: ${{ inputs.azure_tenant_id }}
         subscription-id: ${{ inputs.azure_subscription_id }}
 
+    - name: Create Tofu Plugin Cache Directory
+      run: mkdir -p ~/.tofu.d/plugin-cache
+
+    - name: Cache Tofu Providers
+      uses: actions/cache@v4
+      with:
+        path: ~/.tofu.d/plugin-cache
+        key: ${{ runner.os }}-tofu-${{ hashFiles('**/.terraform.lock.hcl') }}
+
     - name: OpenTofu Init
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TF_PLUGIN_CACHE_DIR: ~/.tofu.d/plugin-cache
       run: tofu init
-
-    - name: OpenTofu Validate
-      run: tofu validate -no-color
 
     # 🟢 PLAN (Create/Update)
     - name: OpenTofu Plan (Create)
