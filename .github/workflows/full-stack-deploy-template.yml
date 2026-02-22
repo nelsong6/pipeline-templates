@@ -96,7 +96,7 @@ jobs:
         run: |
           APP_STACK_ID=${GITHUB_REPOSITORY#*/}
           echo "VITE_AUTH0_DOMAIN=https://$(spacectl stack output --id infra-bootstrap --name auth0_domain --raw)" >> $GITHUB_ENV
-          echo "VITE_API_URL=$(spacectl stack output --id $APP_STACK_ID --name cosmos_db_endpoint --raw)" >> $GITHUB_ENV
+          echo "VITE_API_URL=$(spacectl stack output --id $APP_STACK_ID --name backend_api_url --raw)" >> $GITHUB_ENV
           echo "VITE_AUTH0_CLIENT_ID=$(spacectl stack output --id $APP_STACK_ID --name auth0_client_id --raw)" >> $GITHUB_ENV
           echo "VITE_AUTH0_AUDIENCE=$(spacectl stack output --id $APP_STACK_ID --name auth0_audience --raw)" >> $GITHUB_ENV
           echo "STATIC_WEB_APP_NAME=$(spacectl stack output --id $APP_STACK_ID --name static_web_app_name --raw)" >> $GITHUB_ENV
