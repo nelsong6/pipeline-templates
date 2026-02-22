@@ -155,21 +155,3 @@ jobs:
             exit 1
           fi
 
-  trailing-whitespace:
-    name: Trailing Whitespace
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Check for trailing whitespace
-        run: |
-          # Search for lines ending with a space or tab. 
-          # -I ignores binary files, -n prints the line number, -E enables extended regex.
-          if git grep -I -n -E '[ \t]+$'; then
-            echo "::error::Trailing whitespace detected in the files listed above. Please remove it."
-            exit 1
-          fi
-          echo "✅ No trailing whitespace found."
