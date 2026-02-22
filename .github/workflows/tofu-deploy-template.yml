@@ -1,239 +1,56 @@
-name: Universal OpenTofu Pipeline
+name: Universal Spacelift Pipeline
 
 on:
   workflow_call:
     inputs:
-      action:
-        description: 'OpenTofu action to perform (plan, apply, destroy)'
-        required: false
+      spacelift_endpoint:
+        description: 'Spacelift account endpoint (e.g., https://your-account.app.spacelift.io)'
+        required: true
         type: string
-        default: 'apply'
-      environment:
-        description: 'Target environment'
-        required: false
-        type: string
-        default: 'prod'
-      working_directory:
-        description: 'Directory containing OpenTofu files'
-        required: false
-        type: string
-        default: './tofu'
-      azure_client_id:
-        type: string
-        default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
-      azure_tenant_id:
-        type: string
-        default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
-      azure_subscription_id:
-        type: string
-        default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
 
 permissions:
   id-token: write
   contents: read
-  pull-requests: write
-  actions: write
-
-env:
-  TOFU_VERSION: 'latest'
 
 jobs:
-  # ----------------------------------------------------------------
-  # JOB 1: PLAN (Runs on both PRs and Main pushes)
-  # ----------------------------------------------------------------
-  plan:
-    name: OpenTofu Plan
+  spacelift-execution:
+    name: Spacelift Infrastructure Run
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
-    
-    outputs:
-      should_apply: ${{ steps.analyze.outputs.should_apply }}
-      has_changes: ${{ steps.plan-exec.outputs.has_changes }}
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup OpenTofu
-      uses: opentofu/setup-opentofu@v1
-      with:
-        tofu_version: ${{ env.TOFU_VERSION }}
+    - name: Install spacectl
+      uses: spacelift-io/setup-spacectl@v1
 
-    - name: Azure Login via OIDC
-      uses: azure/login@v2
-      with:
-        client-id: ${{ inputs.azure_client_id }}
-        tenant-id: ${{ inputs.azure_tenant_id }}
-        subscription-id: ${{ inputs.azure_subscription_id }}
-
-    - name: Create Plugin Cache
-      run: mkdir -p ~/.tofu.d/plugin-cache
-
-    - name: Cache Providers
-      uses: actions/cache@v4
-      with:
-        path: ~/.tofu.d/plugin-cache
-        key: ${{ runner.os }}-tofu-${{ hashFiles('**/.terraform.lock.hcl') }}
-
-    - name: Generate OIDC Token for Infisical
-      id: infisical-token
-      uses: actions/github-script@v7
-      with:
-        result-encoding: string
-        script: |
-          return await core.getIDToken('https://github.com/nelsong6');
-
-    - name: OpenTofu Init
-      env:
-        TF_PLUGIN_CACHE_DIR: ~/.tofu.d/plugin-cache
-        GITHUB_OIDC_TOKEN: ${{ steps.infisical-token.outputs.result }}
-      run: tofu init
-
-    - name: OpenTofu Validate
-      run: tofu validate -no-color
-
-    - name: OpenTofu Plan
-      id: plan-exec
-      env:
-        GITHUB_OIDC_TOKEN: ${{ steps.infisical-token.outputs.result }}
+    - name: Authenticate to Spacelift via OIDC
       run: |
-        # Handle destroy vs create plans
-        if [ "${{ inputs.action }}" == "destroy" ]; then
-          tofu plan -destroy -no-color -out=tfplan 2>&1 | tee plan_output.txt
-        else
-          tofu plan -no-color -out=tfplan 2>&1 | tee plan_output.txt
-        fi
+        spacectl profile create oidc-profile \
+          --endpoint ${{ inputs.spacelift_endpoint }} \
+          --type github
+
+    - name: Execute Spacelift Run
+      run: |
+        APP_STACK_ID=${GITHUB_REPOSITORY#*/}
         
-        if grep -q "Error:" plan_output.txt; then
-          echo "❌ ERROR DETECTED in OpenTofu output!"
-          exit 1
-        fi
+        # 1. Pull Requests -> Proposed Run (Plan Only)
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          echo "Triggering Proposed Run (Plan) in Spacelift for PR..."
+          
+          # We pass the PR's specific commit SHA and --tail to stream logs back to GitHub
+          spacectl stack propose \
+            --id $APP_STACK_ID \
+            --sha ${{ github.event.pull_request.head.sha }} \
+            --tail
         
-        if grep -q "No changes." plan_output.txt || grep -q "0 to add, 0 to change, 0 to destroy" plan_output.txt; then
-          echo "has_changes=false" >> $GITHUB_OUTPUT
+        # 2. Main Branch Pushes -> Tracked Run (Plan & Apply)
         else
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Analyze Plan Results
-      id: analyze
-      run: |
-        SHOULD_APPLY="false"
-        if [ "${{ steps.plan-exec.outputs.has_changes }}" == "true" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
-          SHOULD_APPLY="true"
-        fi
-        echo "should_apply=$SHOULD_APPLY" >> $GITHUB_OUTPUT
-
-    - name: Publish Plan Artifact
-      if: steps.plan-exec.outputs.has_changes == 'true' || github.event_name == 'pull_request'
-      uses: actions/upload-artifact@v4
-      with:
-        name: tfplan
-        path: ${{ inputs.working_directory }}/tfplan
-
-
-    - name: Plan Summary
-      if: always()
-      run: |
-        echo "## OpenTofu Plan" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        if [ -f plan_output.txt ]; then
-          echo "<details><summary>View full plan output</summary>" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```hcl' >> $GITHUB_STEP_SUMMARY
-          cat plan_output.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "</details>" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "_No plan output file found._" >> $GITHUB_STEP_SUMMARY
-        fi
-
-    - name: Comment PR with Plan
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const fs = require('fs');
-          const hasChanges = '${{ steps.plan-exec.outputs.has_changes }}' === 'true';
-          let planOutput = '';
-          try {
-            planOutput = fs.readFileSync('${{ inputs.working_directory }}/plan_output.txt', 'utf8');
-          } catch (e) {
-            planOutput = '_(plan output not available)_';
-          }
+          echo "Triggering Tracked Run (Apply) in Spacelift for main branch..."
           
-          let body = '### OpenTofu Plan Results 豆腐\n\n';
-          if (hasChanges) {
-            body += '✅ **Plan successful** - Infrastructure changes detected\n\nMerge this PR to apply to production.\n\n';
-          } else {
-            body += '✅ **Plan successful** - No infrastructure changes detected\n\n';
-          }
-          
-          body += '<details><summary>View plan output</summary>\n\n```hcl\n';
-          body += planOutput.slice(0, 60000);
-          body += '\n```\n</details>';
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: body
-          });
-
-  # ----------------------------------------------------------------
-  # JOB 2: APPLY (Skipped entirely if triggered by a PR)
-  # ----------------------------------------------------------------
-  apply:
-    name: OpenTofu Apply
-    needs: plan
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    
-    # MAGIC HAPPENS HERE: Only run if it's NOT a PR, and changes exist
-    if: needs.plan.outputs.should_apply == 'true' && github.event_name != 'pull_request'
-    
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup OpenTofu
-      uses: opentofu/setup-opentofu@v1
-      with:
-        tofu_version: ${{ env.TOFU_VERSION }}
-
-    - name: Download Plan Artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: tfplan
-        path: ${{ inputs.working_directory }}
-
-    - name: Azure Login via OIDC
-      uses: azure/login@v2
-      with:
-        client-id: ${{ inputs.azure_client_id }}
-        tenant-id: ${{ inputs.azure_tenant_id }}
-        subscription-id: ${{ inputs.azure_subscription_id }}
-
-    - name: Generate OIDC Token for Infisical
-      id: infisical-token
-      uses: actions/github-script@v7
-      with:
-        result-encoding: string
-        script: |
-          return await core.getIDToken('https://github.com/nelsong6');
-
-    - name: OpenTofu Init
-      env:
-        GITHUB_OIDC_TOKEN: ${{ steps.infisical-token.outputs.result }}
-      run: tofu init
-
-    - name: OpenTofu Apply
-      env:
-        GITHUB_OIDC_TOKEN: ${{ steps.infisical-token.outputs.result }}
-      run: tofu apply -auto-approve tfplan
+          # Tracked runs will execute the plan, and if auto-approve is on, apply it immediately
+          spacectl stack deploy \
+            --id $APP_STACK_ID \
+            --sha ${{ github.sha }} \
+            --tail
+        fi
