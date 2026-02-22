@@ -7,7 +7,7 @@ on:
         description: 'Directory containing the OpenTofu configuration'
         required: false
         type: string
-        default: '.'
+        default: 'tofu'
       environment_name:
         description: 'The GitHub Environment to use for approval gates'
         required: false
