@@ -53,6 +53,11 @@ jobs:
           echo "VITE_AUTH0_AUDIENCE=$(spacectl stack output --id $APP_STACK_ID --name auth0_audience --raw)" >> $GITHUB_ENV
           echo "CONTAINER_APP_NAME=$(spacectl stack output --id $APP_STACK_ID --name container_app_name --raw)" >> $GITHUB_ENV
           echo "RESOURCE_GROUP_NAME=$(spacectl stack output --id $APP_STACK_ID --name resource_group_name --raw)" >> $GITHUB_ENV
+          
+          # Fetch the environment name and the raw hostname
+          echo "ACA_ENVIRONMENT_NAME=$(spacectl stack output --id infra-bootstrap --name container_app_environment_name --raw)" >> $GITHUB_ENV
+          RAW_URL=$(spacectl stack output --id $APP_STACK_ID --name backend_api_url --raw)
+          echo "BACKEND_HOSTNAME=${RAW_URL#https://}" >> $GITHUB_ENV
 
       - name: Azure Login via OIDC
         uses: azure/login@v2
@@ -68,6 +73,15 @@ jobs:
             --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
             --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.target_sha }} \
             --set-env-vars "AUTH0_AUDIENCE=${{ env.VITE_AUTH0_AUDIENCE }}" "AUTH0_CLIENT_ID=${{ env.VITE_AUTH0_CLIENT_ID }}" "AUTH0_DOMAIN=${{ env.VITE_AUTH0_DOMAIN }}"
+
+      - name: Bind Custom Domain & Generate Certificate
+        run: |
+          az containerapp hostname bind \
+            --hostname ${{ env.BACKEND_HOSTNAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --environment ${{ env.ACA_ENVIRONMENT_NAME }} \
+            --validation-method CNAME
 
   # ============================================================================
   # JOB 2: FRONTEND DEPLOYMENT
