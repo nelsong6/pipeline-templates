@@ -8,16 +8,16 @@ on:
         required: false
         type: string
         default: './backend'
-      tofu_directory:
-        description: 'Directory containing OpenTofu files for outputs'
-        required: false
-        type: string
-        default: './tofu'
       image_name_suffix:
         description: 'Name of the docker image (appended to repo name)'
         required: false
         type: string
         default: 'workout-api'
+      spacelift_endpoint:
+        description: 'Spacelift account endpoint (e.g., https://your-account.app.spacelift.io)'
+        required: false
+        type: string
+        default: https://nelsong6.app.us.spacelift.io
       node_version:
         description: 'Node.js version for testing'
         required: false
@@ -85,37 +85,39 @@ jobs:
   build-and-deploy:
     name: Build and Deploy Backend
     runs-on: ubuntu-latest
-    needs: test # Ensure tests pass before we build and deploy
+    needs: test
     environment: prod
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup OpenTofu
-      uses: opentofu/setup-opentofu@v1
-      with:
-        tofu_version: 'latest'
+    # --- SPACELIFT CLI SETUP & AUTH ---
+    
+    - name: Install spacectl
+      uses: spacelift-io/setup-spacectl@v1
 
-    - name: Azure Login via OIDC
-      uses: azure/login@v2
-      with:
-        client-id: ${{ inputs.azure_client_id }}
-        tenant-id: ${{ inputs.azure_tenant_id }}
-        subscription-id: ${{ inputs.azure_subscription_id }}
-
-    - name: Get Infrastructure Outputs
-      id: infra
-      working-directory: ${{ inputs.tofu_directory }}
-      env:
-        ARM_USE_OIDC: true
-        ARM_CLIENT_ID: ${{ inputs.azure_client_id }}
-        ARM_TENANT_ID: ${{ inputs.azure_tenant_id }}
-        ARM_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
+    - name: Authenticate to Spacelift via OIDC
       run: |
-        tofu init
-        echo "CONTAINER_APP_NAME=$(tofu output -raw container_app_name)" >> $GITHUB_OUTPUT
-        echo "RESOURCE_GROUP_NAME=$(tofu output -raw resource_group_name)" >> $GITHUB_OUTPUT
+        spacectl profile create oidc-profile \
+          --endpoint ${{ inputs.spacelift_endpoint }} \
+          --type github
+
+    - name: Fetch Infrastructure Config
+      run: |
+        APP_STACK_ID=${GITHUB_REPOSITORY#*/}
+        echo "Fetching outputs for stack: $APP_STACK_ID..."
+        
+        # App-specific outputs
+        echo "CONTAINER_APP_NAME=$(spacectl stack output --id $APP_STACK_ID --name container_app_name --raw)" >> $GITHUB_ENV
+        echo "RESOURCE_GROUP_NAME=$(spacectl stack output --id $APP_STACK_ID --name resource_group_name --raw)" >> $GITHUB_ENV
+        echo "AUTH0_AUDIENCE=$(spacectl stack output --id $APP_STACK_ID --name auth0_audience --raw)" >> $GITHUB_ENV
+        echo "AUTH0_CLIENT_ID=$(spacectl stack output --id $APP_STACK_ID --name auth0_client_id --raw)" >> $GITHUB_ENV
+        
+        # Global outputs
+        echo "AUTH0_DOMAIN=https://$(spacectl stack output --id infra-bootstrap --name auth0_domain --raw)" >> $GITHUB_ENV
+
+    # --- DOCKER BUILD & PUSH ---
 
     - name: Log in to GitHub Container Registry
       uses: docker/login-action@v3
@@ -143,21 +145,31 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
+    # --- AZURE LOGIN & DEPLOY ---
+
+    - name: Azure Login via OIDC
+      uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.azure_client_id }}
+        tenant-id: ${{ inputs.azure_tenant_id }}
+        subscription-id: ${{ inputs.azure_subscription_id }}
+
     - name: Deploy to Container App
       if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
       run: |
         az containerapp update \
-          --name ${{ steps.infra.outputs.CONTAINER_APP_NAME }} \
-          --resource-group ${{ steps.infra.outputs.RESOURCE_GROUP_NAME }} \
-          --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          --name ${{ env.CONTAINER_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+          --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+          --set-env-vars "AUTH0_AUDIENCE=${{ env.AUTH0_AUDIENCE }}" "AUTH0_CLIENT_ID=${{ env.AUTH0_CLIENT_ID }}" "AUTH0_DOMAIN=${{ env.AUTH0_DOMAIN }}"
 
     - name: Get Container App URL
       if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
       id: app-url
       run: |
         FQDN=$(az containerapp show \
-          --name ${{ steps.infra.outputs.CONTAINER_APP_NAME }} \
-          --resource-group ${{ steps.infra.outputs.RESOURCE_GROUP_NAME }} \
+          --name ${{ env.CONTAINER_APP_NAME }} \
+          --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
           --query "properties.configuration.ingress.fqdn" -o tsv)
         
         echo "### 🚀 Backend API Deployed!" >> $GITHUB_STEP_SUMMARY

@@ -8,11 +8,10 @@ on:
         required: false
         type: string
         default: './frontend'
-      tofu_directory:
-        description: 'Directory containing OpenTofu files for outputs'
-        required: false
+      spacelift_endpoint:
+        description: 'Spacelift account endpoint (e.g., https://your-account.app.spacelift.io)'
+        required: true
         type: string
-        default: './tofu'
       node_version:
         description: 'Node.js version'
         required: false
@@ -36,13 +35,10 @@ on:
 
 permissions:
   id-token: write
-  contents: write   # Required to push tags
+  contents: write
   pull-requests: write
 
 jobs:
-  # ----------------------------------------------------------------
-  # Test Job
-  # ----------------------------------------------------------------
   test:
     name: Run Tests
     runs-on: ubuntu-latest
@@ -69,19 +65,16 @@ jobs:
       working-directory: ${{ inputs.frontend_directory }}
       run: npm test || echo "No tests configured yet"
 
-  # ----------------------------------------------------------------
-  # Build and Deploy Job
-  # ----------------------------------------------------------------
   build-and-deploy:
     name: Build and Deploy Frontend
     runs-on: ubuntu-latest
-    needs: test # Wait for tests to pass
+    needs: test
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch all history for tags
+        fetch-depth: 0
 
     - name: Generate Version Tag
       id: version
@@ -93,12 +86,9 @@ jobs:
           LATEST_TAG="v0.0.0"
         fi
         
-        echo "Highest existing tag: $LATEST_TAG"
-        
         VERSION=${LATEST_TAG#v}
         IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
         
-        # Increment patch version for main branch deployments (push, dispatch, or workflow_call)
         if [[ "${{ github.event_name }}" != "pull_request" && "${{ github.ref }}" == "refs/heads/main" ]]; then
           NEW_PATCH=$((PATCH + 1))
           NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
@@ -109,7 +99,6 @@ jobs:
         fi
         
         if git show-ref --tags --verify --quiet "refs/tags/$NEW_VERSION"; then
-           echo "⚠️ Tag $NEW_VERSION exists! Bumping patch again..."
            NEW_PATCH=$((NEW_PATCH + 1))
            NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
         fi
@@ -121,15 +110,37 @@ jobs:
         echo "version_number=${NEW_VERSION#v}" >> $GITHUB_OUTPUT
         echo "build_sha=$BUILD_SHA" >> $GITHUB_OUTPUT
         echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
-        echo "is_release=$IS_RELEASE" >> $GITHUB_OUTPUT
-        
-        echo "📦 Version: $NEW_VERSION (Build: $BUILD_SHA)"
-        echo "🏷️  Release: $IS_RELEASE"
 
-    - name: Setup OpenTofu
-      uses: opentofu/setup-opentofu@v1
-      with:
-        tofu_version: 'latest'
+    # --- SPACELIFT CLI SETUP & AUTH ---
+    
+    - name: Install spacectl
+      uses: spacelift-io/setup-spacectl@v1
+
+    - name: Authenticate to Spacelift via OIDC
+      run: |
+        spacectl profile create oidc-profile \
+          --endpoint ${{ inputs.spacelift_endpoint }} \
+          --type github
+
+    - name: Fetch Global Config
+      run: |
+        echo "Fetching global outputs from infra-bootstrap..."
+        echo "VITE_AUTH0_DOMAIN=https://$(spacectl stack output --id infra-bootstrap --name auth0_domain --raw)" >> $GITHUB_ENV
+        echo "VITE_API_URL=$(spacectl stack output --id infra-bootstrap --name cosmos_db_endpoint --raw)" >> $GITHUB_ENV
+
+    # --- DYNAMIC STACK ID RESOLUTION ---
+
+    - name: Fetch App Config
+      run: |
+        APP_STACK_ID=${GITHUB_REPOSITORY#*/}
+        echo "Fetching app-specific outputs for stack: $APP_STACK_ID..."
+        
+        echo "STATIC_WEB_APP_NAME=$(spacectl stack output --id $APP_STACK_ID --name static_web_app_name --raw)" >> $GITHUB_ENV
+        echo "VITE_AUTH0_CLIENT_ID=$(spacectl stack output --id $APP_STACK_ID --name auth0_client_id --raw)" >> $GITHUB_ENV
+        echo "VITE_AUTH0_AUDIENCE=$(spacectl stack output --id $APP_STACK_ID --name auth0_audience --raw)" >> $GITHUB_ENV
+        echo "RESOURCE_GROUP_NAME=$(spacectl stack output --id $APP_STACK_ID --name resource_group_name --raw)" >> $GITHUB_ENV
+
+    # --- AZURE LOGIN ---
 
     - name: Azure Login via OIDC
       uses: azure/login@v2
@@ -138,26 +149,7 @@ jobs:
         tenant-id: ${{ inputs.azure_tenant_id }}
         subscription-id: ${{ inputs.azure_subscription_id }}
 
-    - name: Fetch Infrastructure Config
-      id: infra
-      working-directory: ${{ inputs.tofu_directory }}
-      env:
-        ARM_USE_OIDC: true
-        ARM_CLIENT_ID: ${{ inputs.azure_client_id }}
-        ARM_TENANT_ID: ${{ inputs.azure_tenant_id }}
-        ARM_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
-      run: |
-        echo "Initializing OpenTofu to read state..."
-        tofu init
-        
-        echo "Fetching outputs..."
-        echo "VITE_API_URL=$(tofu output -raw cosmos_db_endpoint)" >> $GITHUB_ENV
-        echo "STATIC_WEB_APP_NAME=$(tofu output -raw static_web_app_name)" >> $GITHUB_ENV
-        echo "RESOURCE_GROUP_NAME=$(tofu output -raw resource_group_name)" >> $GITHUB_ENV
-        
-        echo "✅ Config loaded:"
-        echo "  - APP: $(tofu output -raw static_web_app_name)"
-        echo "  - RG:  $(tofu output -raw resource_group_name)"
+    # --- FRONTEND BUILD & DEPLOY ---
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -217,27 +209,4 @@ jobs:
           --query "defaultHostname" -o tsv)
         echo "url=https://$SWA_URL" >> $GITHUB_OUTPUT
         echo "### 🚀 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Build:** \`${{ steps.version.outputs.build_sha }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "**Date:** ${{ steps.version.outputs.build_date }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
         echo "🌐 **Live at:** https://$SWA_URL" >> $GITHUB_STEP_SUMMARY
-
-    - name: Comment PR with deployment URL
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const body = '### 🚀 Preview Deployment\n\n' +
-                       '**Version:** `${{ steps.version.outputs.version }}`\n' +
-                       '**Build:** `${{ steps.version.outputs.build_sha }}`\n' +
-                       '**Date:** ${{ steps.version.outputs.build_date }}\n\n' +
-                       '🌐 **Preview URL:** ${{ steps.swa-url.outputs.url }}';
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: body
-          });

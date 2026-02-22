@@ -1,0 +1,43 @@
+name: Shared Spacelift Branch Reset
+
+on:
+  workflow_call:
+    inputs:
+      spacelift_endpoint:
+        description: 'The Spacelift instance URL (e.g., https://romaine.app.spacelift.io)'
+        required: true
+        type: string
+      target_branch:
+        description: 'The branch to reset the stack to'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      spacelift_api_key_id:
+        required: true
+      spacelift_api_key_secret:
+        required: true
+
+jobs:
+  reset-branch:
+    name: Reset Spacelift Tracked Branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Spacelift CLI (spacectl)
+        uses: spacelift-io/setup-spacectl-action@main
+
+      - name: Update Stack Branch
+        env:
+          SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint }}
+          SPACELIFT_API_KEY_ID: ${{ secrets.spacelift_api_key_id }}
+          SPACELIFT_API_KEY_SECRET: ${{ secrets.spacelift_api_key_secret }}
+          STACK_ID: ${{ github.event.repository.name }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        run: |
+          echo "Targeting Spacelift stack: $STACK_ID"
+          echo "Resetting tracked branch to: $TARGET_BRANCH"
+          
+          # spacectl reads the current state, patches the branch, and pushes it back
+          spacectl stack update --id "$STACK_ID" --branch "$TARGET_BRANCH"
+          
+          echo "✅ Stack branch successfully updated."
