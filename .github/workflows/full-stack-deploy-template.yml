@@ -77,8 +77,7 @@ jobs:
           az containerapp update \
             --name ${{ env.CONTAINER_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
-            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.target_sha }} \
-            --set-env-vars "AUTH0_AUDIENCE=${{ env.VITE_AUTH0_AUDIENCE }}" "AUTH0_CLIENT_ID=${{ env.VITE_AUTH0_CLIENT_ID }}" "AUTH0_DOMAIN=${{ env.VITE_AUTH0_DOMAIN }}"
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.target_sha }}
 
       - name: Bind Custom Domain & Generate Certificate
         run: |
