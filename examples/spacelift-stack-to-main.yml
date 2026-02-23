@@ -3,6 +3,7 @@ name: Reset Spacelift on PR Merge
 on:
   pull_request:
     types: [closed]
+  workflow_dispatch:
 
 jobs:
   # GitHub fires the "closed" event for BOTH merged and unmerged (abandoned) PRs.
