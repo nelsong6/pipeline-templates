@@ -5,7 +5,7 @@ on:
     inputs:
       spacelift_endpoint:
         description: 'The Spacelift instance URL (e.g., https://nelsong6.app.us.spacelift.io)'
-        required: true
+        required: false
         type: string
         default: 'https://nelsong6.app.us.spacelift.io'
       target_branch:
