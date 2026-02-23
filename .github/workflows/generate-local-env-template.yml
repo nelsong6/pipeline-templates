@@ -81,19 +81,19 @@ jobs:
           APP_STACK_ID=${GITHUB_REPOSITORY#*/}
 
           echo "Fetching outputs from infra-bootstrap..."
-          # Set the environment variable for the first batch of calls
-          export SPACELIFT_STACK_ID="infra-bootstrap"
+          # Fetch all outputs as a JSON array
+          INFRA_OUTPUTS=$(spacectl stack outputs --id infra-bootstrap --output json)
           
-          AUTH0_DOMAIN=$(spacectl stack output --name auth0_domain --raw)
-          APP_CONFIG_ENDPOINT=$(spacectl stack output --name azure_app_config_endpoint --raw)
-          TENANT_ID=$(spacectl stack output --name azure_tenant_id --raw)
+          # Extract specific keys and decode them to raw text
+          AUTH0_DOMAIN=$(echo "$INFRA_OUTPUTS" | jq -r '.[] | select(.id == "auth0_domain") | .value | fromjson')
+          APP_CONFIG_ENDPOINT=$(echo "$INFRA_OUTPUTS" | jq -r '.[] | select(.id == "azure_app_config_endpoint") | .value | fromjson')
+          TENANT_ID=$(echo "$INFRA_OUTPUTS" | jq -r '.[] | select(.id == "azure_tenant_id") | .value | fromjson')
 
           echo "Fetching outputs from app stack: $APP_STACK_ID..."
-          # Swap the environment variable for the second batch of calls
-          export SPACELIFT_STACK_ID="$APP_STACK_ID"
+          APP_OUTPUTS=$(spacectl stack outputs --id "$APP_STACK_ID" --output json)
           
-          AUTH0_CLIENT_ID=$(spacectl stack output --name auth0_client_id --raw)
-          AUTH0_AUDIENCE=$(spacectl stack output --name auth0_audience --raw)
+          AUTH0_CLIENT_ID=$(echo "$APP_OUTPUTS" | jq -r '.[] | select(.id == "auth0_client_id") | .value | fromjson')
+          AUTH0_AUDIENCE=$(echo "$APP_OUTPUTS" | jq -r '.[] | select(.id == "auth0_audience") | .value | fromjson')
 
           mkdir -p env-files/frontend env-files/backend
 
