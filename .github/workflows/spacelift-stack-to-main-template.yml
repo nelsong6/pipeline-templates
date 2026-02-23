@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       spacelift_endpoint:
-        description: 'The Spacelift instance URL (e.g., https://romaine.app.spacelift.io)'
+        description: 'The Spacelift instance URL (e.g., https://nelsong6.app.spacelift.io)'
         required: true
         type: string
       target_branch:
@@ -15,9 +15,10 @@ on:
   workflow_dispatch:
     inputs:
       spacelift_endpoint:
-        description: 'The Spacelift instance URL (e.g., https://romaine.app.spacelift.io)'
+        description: 'The Spacelift instance URL'
         required: true
         type: string
+        default: 'https://nelsong6.app.spacelift.io'
       target_branch:
         description: 'The branch to reset the stack to'
         required: false
@@ -33,17 +34,29 @@ jobs:
     name: Reset Spacelift Tracked Branch
     runs-on: ubuntu-latest
     steps:
+      - name: Azure Login via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Spacelift Credentials from Key Vault
+        run: |
+          KV_ID=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
+          echo "::add-mask::$KV_ID"
+          echo "SPACELIFT_API_KEY_ID=$KV_ID" >> $GITHUB_ENV
+
+          KV_SECRET=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
+          echo "::add-mask::$KV_SECRET"
+          echo "SPACELIFT_API_KEY_SECRET=$KV_SECRET" >> $GITHUB_ENV
+
       - name: Setup Spacelift CLI (spacectl)
         uses: spacelift-io/setup-spacectl@v1
 
-      - name: Authenticate to Spacelift via OIDC
-        run: |
-          spacectl profile create oidc-profile \
-            --endpoint ${{ inputs.spacelift_endpoint }} \
-            --type github
-
       - name: Update Stack Branch
         env:
+          SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint }}
           STACK_ID: ${{ github.event.repository.name }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
@@ -52,9 +65,9 @@ jobs:
           
           # spacectl reads the current state, patches the branch, and pushes it back
           spacectl stack update --id "$STACK_ID" --branch "$TARGET_BRANCH"
-          
           echo "✅ Stack branch successfully updated."
 
+          # Reconcile state by triggering a deployment
           echo "Triggering deployment on $TARGET_BRANCH..."
           spacectl stack deploy --id "$STACK_ID"
           echo "✅ Deployment triggered successfully."

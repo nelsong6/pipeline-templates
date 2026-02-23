@@ -39,13 +39,26 @@ jobs:
       - name: Install spacectl
         uses: spacelift-io/setup-spacectl@v1
 
-      - name: Authenticate to Spacelift via OIDC
+      - name: Azure Login via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Spacelift Credentials from Key Vault
         run: |
-          spacectl profile create oidc-profile \
-            --endpoint https://your-account.app.spacelift.io \
-            --type github
+          KV_ID=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
+          echo "::add-mask::$KV_ID"
+          echo "SPACELIFT_API_KEY_ID=$KV_ID" >> $GITHUB_ENV
+
+          KV_SECRET=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
+          echo "::add-mask::$KV_SECRET"
+          echo "SPACELIFT_API_KEY_SECRET=$KV_SECRET" >> $GITHUB_ENV
 
       - name: Fetch Backend Outputs
+        env:
+          SPACELIFT_API_KEY_ENDPOINT: 'https://nelsong6.app.spacelift.io'
         run: |
           APP_STACK_ID=${GITHUB_REPOSITORY#*/}
           echo "VITE_AUTH0_DOMAIN=https://$(spacectl stack output --id infra-bootstrap --name auth0_domain --raw)" >> $GITHUB_ENV
@@ -53,18 +66,11 @@ jobs:
           echo "VITE_AUTH0_AUDIENCE=$(spacectl stack output --id $APP_STACK_ID --name auth0_audience --raw)" >> $GITHUB_ENV
           echo "CONTAINER_APP_NAME=$(spacectl stack output --id $APP_STACK_ID --name container_app_name --raw)" >> $GITHUB_ENV
           echo "RESOURCE_GROUP_NAME=$(spacectl stack output --id $APP_STACK_ID --name resource_group_name --raw)" >> $GITHUB_ENV
-          
+
           # Fetch the environment name and the raw hostname
           echo "ACA_ENVIRONMENT_NAME=$(spacectl stack output --id infra-bootstrap --name container_app_environment_name --raw)" >> $GITHUB_ENV
           RAW_URL=$(spacectl stack output --id $APP_STACK_ID --name backend_api_url --raw)
           echo "BACKEND_HOSTNAME=${RAW_URL#https://}" >> $GITHUB_ENV
-
-      - name: Azure Login via OIDC
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy to Container App
         run: |
@@ -100,13 +106,26 @@ jobs:
       - name: Install spacectl
         uses: spacelift-io/setup-spacectl@v1
 
-      - name: Authenticate to Spacelift via OIDC
+      - name: Azure Login via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Spacelift Credentials from Key Vault
         run: |
-          spacectl profile create oidc-profile \
-            --endpoint https://your-account.app.spacelift.io \
-            --type github
+          KV_ID=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
+          echo "::add-mask::$KV_ID"
+          echo "SPACELIFT_API_KEY_ID=$KV_ID" >> $GITHUB_ENV
+
+          KV_SECRET=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
+          echo "::add-mask::$KV_SECRET"
+          echo "SPACELIFT_API_KEY_SECRET=$KV_SECRET" >> $GITHUB_ENV
 
       - name: Fetch Frontend Outputs
+        env:
+          SPACELIFT_API_KEY_ENDPOINT: 'https://nelsong6.app.spacelift.io'
         run: |
           APP_STACK_ID=${GITHUB_REPOSITORY#*/}
           echo "VITE_AUTH0_DOMAIN=https://$(spacectl stack output --id infra-bootstrap --name auth0_domain --raw)" >> $GITHUB_ENV
@@ -122,19 +141,12 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: './frontend/package-lock.json'
-          
+
       - name: Build Frontend
         working-directory: ./frontend
         run: |
           npm ci
           npm run build
-
-      - name: Azure Login via OIDC
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Get Static Web App Deployment Token
         id: static-web-app-token

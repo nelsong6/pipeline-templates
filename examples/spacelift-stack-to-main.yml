@@ -5,10 +5,6 @@ on:
     types: [closed]
   workflow_dispatch:
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   reset-spacelift:
     # Run if manually triggered OR if the PR was actually merged
@@ -17,3 +13,4 @@ jobs:
     with:
       spacelift_endpoint: 'https://nelsong6.app.spacelift.io'
       target_branch: 'main'
+    secrets: inherit
