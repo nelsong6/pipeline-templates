@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       spacelift_endpoint:
-        description: 'The Spacelift instance URL (e.g., https://nelsong6.app.spacelift.io)'
+        description: 'The Spacelift instance URL (e.g., https://nelsong6.app.us.spacelift.io)'
         required: true
         type: string
       target_branch:
@@ -27,13 +27,14 @@ on:
         required: false
         type: string
         default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
+
   workflow_dispatch:
     inputs:
       spacelift_endpoint:
         description: 'The Spacelift instance URL'
         required: true
         type: string
-        default: 'https://nelsong6.app.spacelift.io'
+        default: 'https://nelsong6.app.us.spacelift.io'
       target_branch:
         description: 'The branch to reset the stack to'
         required: false
@@ -73,16 +74,13 @@ jobs:
 
       - name: Fetch Spacelift Credentials from Key Vault
         run: |
-          # Ensure errors in pipes cause the step to fail
           set -euo pipefail
           
-          echo "Fetching Key ID from Vault: ${{ vars.AZURE_KEY_VAULT_NAME }}..."
           RAW_ID=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
           KV_ID=$(echo "$RAW_ID" | tr -d '\r\n')
           echo "::add-mask::$KV_ID"
           echo "SPACELIFT_API_KEY_ID=$KV_ID" >> $GITHUB_ENV
 
-          echo "Fetching Key Secret from Vault..."
           RAW_SECRET=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
           KV_SECRET=$(echo "$RAW_SECRET" | tr -d '\r\n')
           echo "::add-mask::$KV_SECRET"
@@ -104,12 +102,10 @@ jobs:
             async function run() {
               const endpoint = process.env.SPACELIFT_API_KEY_ENDPOINT + "/graphql";
               const headers = { "Content-Type": "application/json" };
-              
-              // Trim any residual whitespace just to be absolutely safe
               const id = process.env.SPACELIFT_API_KEY_ID.trim();
               const secret = process.env.SPACELIFT_API_KEY_SECRET.trim();
 
-              // 1. Authenticate via GraphQL (Using safe variables instead of string interpolation)
+              // 1. Authenticate via GraphQL
               const authRes = await fetch(endpoint, {
                 method: "POST", headers,
                 body: JSON.stringify({
@@ -118,16 +114,14 @@ jobs:
                 })
               }).then(r => r.json());
               
-              if (authRes.errors) throw new Error("Auth mutation errors: " + JSON.stringify(authRes.errors));
-              if (!authRes.data || !authRes.data.apiKeyUser) throw new Error("Auth failed, returned null. Double check your API Key ID and Secret in Azure Key Vault.");
-              
+              if (authRes.errors) throw new Error("Auth errors: " + JSON.stringify(authRes.errors));
               headers["Authorization"] = `Bearer ${authRes.data.apiKeyUser.jwt}`;
 
-              // 2. Fetch current stack state to preserve all existing OpenTofu configurations
+              // 2. Fetch current stack state
               const getStack = await fetch(endpoint, {
                 method: "POST", headers,
                 body: JSON.stringify({
-                  query: `query($id: ID!) { stack(id: $id) { name repository branch administrative autodeploy autoretry description projectRoot space labels workerPool { id } vendorConfig { __typename ... on TerraformConfig { version workspace manageState workflowTool } } } }`,
+                  query: `query($id: ID!) { stack(id: $id) { name repository branch administrative autodeploy autoretry description projectRoot space labels workerPool { id } vendorConfig { __typename ... on StackConfigVendorTerraform { version workspace workflowTool } } } }`,
                   variables: { id: process.env.SPACELIFT_STACK_ID }
                 })
               }).then(r => r.json());
@@ -135,7 +129,7 @@ jobs:
               if (!getStack.data || !getStack.data.stack) throw new Error("Fetch stack failed: " + JSON.stringify(getStack));
               const stack = getStack.data.stack;
               
-              // 3. Construct StackInput perfectly mapping the existing state, injecting the new branch
+              // 3. Construct StackInput perfectly mapping the existing state
               const input = {
                 name: stack.name,
                 repository: stack.repository,
@@ -151,11 +145,10 @@ jobs:
                 vendorConfig: {}
               };
 
-              if (stack.vendorConfig && stack.vendorConfig.__typename === "TerraformConfig") {
+              if (stack.vendorConfig && stack.vendorConfig.__typename === "StackConfigVendorTerraform") {
                 input.vendorConfig.terraform = {
                   version: stack.vendorConfig.version,
                   workspace: stack.vendorConfig.workspace,
-                  manageState: stack.vendorConfig.manageState,
                   workflowTool: stack.vendorConfig.workflowTool
                 };
               }
