@@ -81,13 +81,19 @@ jobs:
           APP_STACK_ID=${GITHUB_REPOSITORY#*/}
 
           echo "Fetching outputs from infra-bootstrap..."
-          AUTH0_DOMAIN=$(spacectl stack output --id infra-bootstrap --name auth0_domain --raw)
-          APP_CONFIG_ENDPOINT=$(spacectl stack output --id infra-bootstrap --name azure_app_config_endpoint --raw)
-          TENANT_ID=$(spacectl stack output --id infra-bootstrap --name azure_tenant_id --raw)
+          # Set the environment variable for the first batch of calls
+          export SPACELIFT_STACK_ID="infra-bootstrap"
+          
+          AUTH0_DOMAIN=$(spacectl stack output --name auth0_domain --raw)
+          APP_CONFIG_ENDPOINT=$(spacectl stack output --name azure_app_config_endpoint --raw)
+          TENANT_ID=$(spacectl stack output --name azure_tenant_id --raw)
 
           echo "Fetching outputs from app stack: $APP_STACK_ID..."
-          AUTH0_CLIENT_ID=$(spacectl stack output --id "$APP_STACK_ID" --name auth0_client_id --raw)
-          AUTH0_AUDIENCE=$(spacectl stack output --id "$APP_STACK_ID" --name auth0_audience --raw)
+          # Swap the environment variable for the second batch of calls
+          export SPACELIFT_STACK_ID="$APP_STACK_ID"
+          
+          AUTH0_CLIENT_ID=$(spacectl stack output --name auth0_client_id --raw)
+          AUTH0_AUDIENCE=$(spacectl stack output --name auth0_audience --raw)
 
           mkdir -p env-files/frontend env-files/backend
 
