@@ -41,3 +41,7 @@ jobs:
           spacectl stack update --id "$STACK_ID" --branch "$TARGET_BRANCH"
           
           echo "✅ Stack branch successfully updated."
+
+          echo "Triggering deployment on $TARGET_BRANCH..."
+          spacectl stack deploy --id "$STACK_ID"
+          echo "✅ Deployment triggered successfully."
