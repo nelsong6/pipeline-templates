@@ -7,6 +7,7 @@ on:
         description: 'The Spacelift instance URL (e.g., https://nelsong6.app.us.spacelift.io)'
         required: true
         type: string
+        default: 'https://nelsong6.app.us.spacelift.io'
       target_branch:
         description: 'The branch to reset the stack to'
         required: false

@@ -10,7 +10,4 @@ jobs:
     # Run if manually triggered OR if the PR was actually merged
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: nelsong6/pipeline-templates/.github/workflows/spacelift-stack-to-main-template.yml@main
-    with:
-      spacelift_endpoint: 'https://nelsong6.app.spacelift.io'
-      target_branch: 'main'
     secrets: inherit
