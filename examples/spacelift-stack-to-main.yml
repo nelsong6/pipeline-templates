@@ -5,15 +5,15 @@ on:
     types: [closed]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
-  # GitHub fires the "closed" event for BOTH merged and unmerged (abandoned) PRs.
-  # We use this if-condition to ensure it only runs if the PR was actually merged.
   reset-spacelift:
-    if: github.event.pull_request.merged == true
+    # Run if manually triggered OR if the PR was actually merged
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     uses: nelsong6/pipeline-templates/.github/workflows/spacelift-stack-to-main-template.yml@main
     with:
       spacelift_endpoint: 'https://nelsong6.app.spacelift.io'
       target_branch: 'main'
-    secrets:
-      spacelift_api_key_id: ${{ secrets.SPACELIFT_API_KEY_ID }}
-      spacelift_api_key_secret: ${{ secrets.SPACELIFT_API_KEY_SECRET }}

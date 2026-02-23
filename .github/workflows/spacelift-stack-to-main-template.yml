@@ -12,11 +12,21 @@ on:
         required: false
         type: string
         default: 'main'
-    secrets:
-      spacelift_api_key_id:
+  workflow_dispatch:
+    inputs:
+      spacelift_endpoint:
+        description: 'The Spacelift instance URL (e.g., https://romaine.app.spacelift.io)'
         required: true
-      spacelift_api_key_secret:
-        required: true
+        type: string
+      target_branch:
+        description: 'The branch to reset the stack to'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   reset-branch:
@@ -24,13 +34,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup Spacelift CLI (spacectl)
-        uses: spacelift-io/setup-spacectl-action@main
+        uses: spacelift-io/setup-spacectl@v1
+
+      - name: Authenticate to Spacelift via OIDC
+        run: |
+          spacectl profile create oidc-profile \
+            --endpoint ${{ inputs.spacelift_endpoint }} \
+            --type github
 
       - name: Update Stack Branch
         env:
-          SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint }}
-          SPACELIFT_API_KEY_ID: ${{ secrets.spacelift_api_key_id }}
-          SPACELIFT_API_KEY_SECRET: ${{ secrets.spacelift_api_key_secret }}
           STACK_ID: ${{ github.event.repository.name }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
