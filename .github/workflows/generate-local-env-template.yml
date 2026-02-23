@@ -8,12 +8,6 @@ on:
         required: false
         type: string
         default: 'https://nelsong6.app.us.spacelift.io'
-      app_prefix:
-        description: 'App Config Prefix (e.g. workout)'
-        required: false
-        type: string
-        # Defaults to the repository name if not provided
-        default: ${{ github.event.repository.name }}
       azure_client_id:
         description: 'Azure Client ID (OIDC)'
         required: false
@@ -32,12 +26,22 @@ on:
 
   workflow_dispatch:
     inputs:
-      app_prefix:
-        description: 'App Config Prefix (override if different from repo name)'
+      azure_client_id:
+        description: 'Azure Client ID (OIDC)'
         required: false
         type: string
-        default: 'workout'
-
+        default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
+      azure_tenant_id:
+        description: 'Azure Tenant ID'
+        required: false
+        type: string
+        default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
+      azure_subscription_id:
+        description: 'Azure Subscription ID'
+        required: false
+        type: string
+        default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
+    
 permissions:
   id-token: write
   contents: read
@@ -75,7 +79,6 @@ jobs:
       - name: Fetch Outputs & Generate Files
         env:
           SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint || 'https://nelsong6.app.us.spacelift.io' }}
-          APP_PREFIX: ${{ inputs.app_prefix }}
         run: |
           set -euo pipefail
           APP_STACK_ID=${GITHUB_REPOSITORY#*/}
@@ -94,6 +97,7 @@ jobs:
           
           AUTH0_CLIENT_ID=$(echo "$APP_OUTPUTS" | jq -r '.[] | select(.id == "auth0_client_id") | .value | fromjson')
           AUTH0_AUDIENCE=$(echo "$APP_OUTPUTS" | jq -r '.[] | select(.id == "auth0_audience") | .value | fromjson')
+          APP_PREFIX=$(echo "$APP_OUTPUTS" | jq -r '.[] | select(.id == "app_config_prefix") | .value | fromjson')
 
           mkdir -p env-files/frontend env-files/backend
 
