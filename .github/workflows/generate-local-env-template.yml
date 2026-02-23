@@ -116,3 +116,4 @@ jobs:
           name: local-env-files
           path: env-files/
           retention-days: 1
+          include-hidden-files: true
