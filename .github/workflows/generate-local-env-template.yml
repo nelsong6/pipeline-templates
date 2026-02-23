@@ -2,6 +2,41 @@ name: Generate Local .env Files
 
 on:
   workflow_call:
+    inputs:
+      spacelift_endpoint:
+        description: 'The Spacelift instance URL'
+        required: false
+        type: string
+        default: 'https://nelsong6.app.us.spacelift.io'
+      app_prefix:
+        description: 'App Config Prefix (e.g. workout)'
+        required: false
+        type: string
+        # Defaults to the repository name if not provided
+        default: ${{ github.event.repository.name }}
+      azure_client_id:
+        description: 'Azure Client ID (OIDC)'
+        required: false
+        type: string
+        default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
+      azure_tenant_id:
+        description: 'Azure Tenant ID'
+        required: false
+        type: string
+        default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
+      azure_subscription_id:
+        description: 'Azure Subscription ID'
+        required: false
+        type: string
+        default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
+
+  workflow_dispatch:
+    inputs:
+      app_prefix:
+        description: 'App Config Prefix (override if different from repo name)'
+        required: false
+        type: string
+        default: 'workout'
 
 permissions:
   id-token: write
@@ -13,15 +48,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install spacectl
-        uses: spacelift-io/setup-spacectl@v1
-
       - name: Azure Login via OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ inputs.azure_client_id || '043b35c3-f5de-4578-acd2-8b8f4c78f461' }}
+          tenant-id: ${{ inputs.azure_tenant_id || '2236b5e4-81d2-4d82-bde5-17b1037999ea' }}
+          subscription-id: ${{ inputs.azure_subscription_id || 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c' }}
 
       - name: Fetch Spacelift Credentials from Key Vault
         run: |
@@ -37,56 +69,40 @@ jobs:
           echo "::add-mask::$KV_SECRET"
           echo "SPACELIFT_API_KEY_SECRET=$KV_SECRET" >> $GITHUB_ENV
 
-      - name: Fetch Outputs from Spacelift
+      - name: Setup Spacelift CLI
+        uses: spacelift-io/setup-spacectl@v1
+
+      - name: Fetch Outputs & Generate Files
         env:
-          SPACELIFT_API_KEY_ENDPOINT: 'https://nelsong6.app.us.spacelift.io'
+          SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint || 'https://nelsong6.app.us.spacelift.io' }}
+          APP_PREFIX: ${{ inputs.app_prefix }}
         run: |
           set -euo pipefail
           APP_STACK_ID=${GITHUB_REPOSITORY#*/}
 
-          # infra-bootstrap outputs
+          echo "Fetching outputs from infra-bootstrap..."
           AUTH0_DOMAIN=$(spacectl stack output --id infra-bootstrap --name auth0_domain --raw)
           APP_CONFIG_ENDPOINT=$(spacectl stack output --id infra-bootstrap --name azure_app_config_endpoint --raw)
           TENANT_ID=$(spacectl stack output --id infra-bootstrap --name azure_tenant_id --raw)
 
-          # app stack outputs
+          echo "Fetching outputs from app stack: $APP_STACK_ID..."
           AUTH0_CLIENT_ID=$(spacectl stack output --id "$APP_STACK_ID" --name auth0_client_id --raw)
           AUTH0_AUDIENCE=$(spacectl stack output --id "$APP_STACK_ID" --name auth0_audience --raw)
-          BACKEND_API_URL=$(spacectl stack output --id "$APP_STACK_ID" --name backend_api_url --raw)
 
-          # Write to GITHUB_ENV for the next step
-          echo "AUTH0_DOMAIN=$AUTH0_DOMAIN" >> $GITHUB_ENV
-          echo "APP_CONFIG_ENDPOINT=$APP_CONFIG_ENDPOINT" >> $GITHUB_ENV
-          echo "TENANT_ID=$TENANT_ID" >> $GITHUB_ENV
-          echo "AUTH0_CLIENT_ID=$AUTH0_CLIENT_ID" >> $GITHUB_ENV
-          echo "AUTH0_AUDIENCE=$AUTH0_AUDIENCE" >> $GITHUB_ENV
-          echo "BACKEND_API_URL=$BACKEND_API_URL" >> $GITHUB_ENV
-
-      - name: Generate .env Files
-        run: |
           mkdir -p env-files/frontend env-files/backend
 
-          cat > env-files/frontend/.env <<EOF
-          VITE_API_URL=http://localhost:3000
-          VITE_AUTH0_DOMAIN=https://${{ env.AUTH0_DOMAIN }}
-          VITE_AUTH0_CLIENT_ID=${{ env.AUTH0_CLIENT_ID }}
-          VITE_AUTH0_AUDIENCE=${{ env.AUTH0_AUDIENCE }}
-          EOF
+          echo "Writing frontend/.env..."
+          echo "VITE_API_URL=http://localhost:3000" > env-files/frontend/.env
+          echo "VITE_AUTH0_DOMAIN=https://$AUTH0_DOMAIN" >> env-files/frontend/.env
+          echo "VITE_AUTH0_CLIENT_ID=$AUTH0_CLIENT_ID" >> env-files/frontend/.env
+          echo "VITE_AUTH0_AUDIENCE=$AUTH0_AUDIENCE" >> env-files/frontend/.env
 
-          cat > env-files/backend/.env <<EOF
-          AZURE_APP_CONFIG_ENDPOINT=${{ env.APP_CONFIG_ENDPOINT }}
-          APP_CONFIG_PREFIX=workout
-          AZURE_TENANT_ID=${{ env.TENANT_ID }}
-          EOF
+          echo "Writing backend/.env..."
+          echo "AZURE_APP_CONFIG_ENDPOINT=$APP_CONFIG_ENDPOINT" > env-files/backend/.env
+          echo "APP_CONFIG_PREFIX=$APP_PREFIX" >> env-files/backend/.env
+          echo "AZURE_TENANT_ID=$TENANT_ID" >> env-files/backend/.env
 
-          # Strip leading whitespace from heredoc indentation
-          sed -i 's/^[[:space:]]*//' env-files/frontend/.env env-files/backend/.env
-
-          echo "--- frontend/.env ---"
-          cat env-files/frontend/.env
-          echo ""
-          echo "--- backend/.env ---"
-          cat env-files/backend/.env
+          echo "✅ Files successfully generated."
 
       - name: Upload .env Artifact
         uses: actions/upload-artifact@v4
