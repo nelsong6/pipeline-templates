@@ -87,17 +87,17 @@ jobs:
       - name: Update Stack Branch
         env:
           SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint }}
-          STACK_ID: ${{ github.event.repository.name }}
+          SPACELIFT_STACK_ID: ${{ github.event.repository.name }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
-          echo "Targeting Spacelift stack: $STACK_ID"
+          echo "Targeting Spacelift stack: $SPACELIFT_STACK_ID"
           echo "Resetting tracked branch to: $TARGET_BRANCH"
           
-          # spacectl reads the current state, patches the branch, and pushes it back
-          spacectl stack update --id "$STACK_ID" --branch "$TARGET_BRANCH"
+          # spacectl reads the stack ID from the environment, no --id flag needed here
+          spacectl stack update --branch "$TARGET_BRANCH"
           echo "✅ Stack branch successfully updated."
 
-          # Reconcile state by triggering a deployment
+          # Reconcile state by triggering a deployment (this command DOES require --id)
           echo "Triggering deployment on $TARGET_BRANCH..."
-          spacectl stack deploy --id "$STACK_ID"
+          spacectl stack deploy --id "$SPACELIFT_STACK_ID"
           echo "✅ Deployment triggered successfully."
