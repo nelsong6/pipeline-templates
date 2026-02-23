@@ -9,7 +9,7 @@ jobs:
   # We use this if-condition to ensure it only runs if the PR was actually merged.
   reset-spacelift:
     if: github.event.pull_request.merged == true
-    uses: nelsong6/pipeline-templates/.github/workflows/spacelift-reset-branch.yml@main
+    uses: nelsong6/pipeline-templates/.github/workflows/spacelift-stack-to-main-template.yml@main
     with:
       spacelift_endpoint: 'https://nelsong6.app.spacelift.io'
       target_branch: 'main'
