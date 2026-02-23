@@ -91,13 +91,77 @@ jobs:
           TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
           echo "Targeting Spacelift stack: $SPACELIFT_STACK_ID"
-          echo "Resetting tracked branch to: $TARGET_BRANCH"
+          echo "Resetting tracked branch to: $TARGET_BRANCH via GraphQL API"
           
-          # spacectl reads the stack ID from the environment, no --id flag needed here
-          spacectl stack update --branch "$TARGET_BRANCH"
-          echo "✅ Stack branch successfully updated."
+          node -e '
+            async function run() {
+              const endpoint = process.env.SPACELIFT_API_KEY_ENDPOINT + "/graphql";
+              const headers = { "Content-Type": "application/json" };
+              
+              // 1. Authenticate via GraphQL
+              const authRes = await fetch(endpoint, {
+                method: "POST", headers,
+                body: JSON.stringify({
+                  query: `mutation { apiKeyUser(id: "${process.env.SPACELIFT_API_KEY_ID}", secret: "${process.env.SPACELIFT_API_KEY_SECRET}") { jwt } }`
+                })
+              }).then(r => r.json());
+              
+              if (!authRes.data) throw new Error("Auth failed: " + JSON.stringify(authRes));
+              headers["Authorization"] = `Bearer ${authRes.data.apiKeyUser.jwt}`;
 
-          # Reconcile state by triggering a deployment (this command DOES require --id)
+              // 2. Fetch current stack state to preserve all existing OpenTofu configurations
+              const getStack = await fetch(endpoint, {
+                method: "POST", headers,
+                body: JSON.stringify({
+                  query: `query($id: ID!) { stack(id: $id) { name repository branch administrative autodeploy autoretry description projectRoot space labels workerPool { id } vendorConfig { __typename ... on TerraformConfig { version workspace manageState workflowTool } } } }`,
+                  variables: { id: process.env.SPACELIFT_STACK_ID }
+                })
+              }).then(r => r.json());
+
+              if (!getStack.data || !getStack.data.stack) throw new Error("Fetch stack failed: " + JSON.stringify(getStack));
+              const stack = getStack.data.stack;
+              
+              // 3. Construct StackInput perfectly mapping the existing state, injecting the new branch
+              const input = {
+                name: stack.name,
+                repository: stack.repository,
+                branch: process.env.TARGET_BRANCH,
+                administrative: stack.administrative,
+                autodeploy: stack.autodeploy,
+                autoretry: stack.autoretry,
+                description: stack.description,
+                projectRoot: stack.projectRoot,
+                space: stack.space,
+                labels: stack.labels || [],
+                workerPool: stack.workerPool ? stack.workerPool.id : null,
+                vendorConfig: {}
+              };
+
+              if (stack.vendorConfig && stack.vendorConfig.__typename === "TerraformConfig") {
+                input.vendorConfig.terraform = {
+                  version: stack.vendorConfig.version,
+                  workspace: stack.vendorConfig.workspace,
+                  manageState: stack.vendorConfig.manageState,
+                  workflowTool: stack.vendorConfig.workflowTool
+                };
+              }
+
+              // 4. Send GraphQL Mutation
+              const updateRes = await fetch(endpoint, {
+                method: "POST", headers,
+                body: JSON.stringify({
+                  query: `mutation($id: ID!, $input: StackInput!) { stackUpdate(id: $id, input: $input) { id branch } }`,
+                  variables: { id: process.env.SPACELIFT_STACK_ID, input }
+                })
+              }).then(r => r.json());
+
+              if (updateRes.errors) throw new Error("Update failed: " + JSON.stringify(updateRes.errors));
+              console.log("✅ Stack branch successfully updated to: " + updateRes.data.stackUpdate.branch);
+            }
+            run().catch(e => { console.error(e.message); process.exit(1); });
+          '
+
+          # Reconcile state by triggering a deployment (this command DOES exist and requires --id)
           echo "Triggering deployment on $TARGET_BRANCH..."
           spacectl stack deploy --id "$SPACELIFT_STACK_ID"
           echo "✅ Deployment triggered successfully."
