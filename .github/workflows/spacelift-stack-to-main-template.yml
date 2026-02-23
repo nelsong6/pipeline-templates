@@ -90,15 +90,16 @@ jobs:
         uses: spacelift-io/setup-spacectl@v1
 
       - name: Update Stack Branch
+        id: update_branch
         env:
           SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint }}
           SPACELIFT_STACK_ID: ${{ github.event.repository.name }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
         run: |
           echo "Targeting Spacelift stack: $SPACELIFT_STACK_ID"
-          echo "Resetting tracked branch to: $TARGET_BRANCH via GraphQL API"
           
           node -e '
+            const fs = require("fs");
             async function run() {
               const endpoint = process.env.SPACELIFT_API_KEY_ENDPOINT + "/graphql";
               const headers = { "Content-Type": "application/json" };
@@ -129,6 +130,15 @@ jobs:
               if (!getStack.data || !getStack.data.stack) throw new Error("Fetch stack failed: " + JSON.stringify(getStack));
               const stack = getStack.data.stack;
               
+              // EARLY EXIT: If the branch is already correct, flag it and skip the mutation
+              if (stack.branch === process.env.TARGET_BRANCH) {
+                console.log(`✅ Stack "${stack.name}" is already tracking branch "${stack.branch}". Skipping update and deployment.`);
+                fs.appendFileSync(process.env.GITHUB_OUTPUT, "changed=false\n");
+                return;
+              }
+
+              console.log(`Resetting tracked branch from "${stack.branch}" to "${process.env.TARGET_BRANCH}" via GraphQL API...`);
+
               // 3. Construct StackInput perfectly mapping the existing state
               const input = {
                 name: stack.name,
@@ -164,11 +174,18 @@ jobs:
 
               if (updateRes.errors) throw new Error("Update failed: " + JSON.stringify(updateRes.errors));
               console.log("✅ Stack branch successfully updated to: " + updateRes.data.stackUpdate.branch);
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, "changed=true\n");
             }
             run().catch(e => { console.error(e.message); process.exit(1); });
           '
 
-          # Reconcile state by triggering a deployment
+      - name: Trigger Deployment
+        if: steps.update_branch.outputs.changed == 'true'
+        env:
+          SPACELIFT_API_KEY_ENDPOINT: ${{ inputs.spacelift_endpoint }}
+          SPACELIFT_STACK_ID: ${{ github.event.repository.name }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        run: |
           echo "Triggering deployment on $TARGET_BRANCH..."
           spacectl stack deploy --id "$SPACELIFT_STACK_ID"
           echo "✅ Deployment triggered successfully."
