@@ -42,17 +42,17 @@ jobs:
       - name: Azure Login via OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.ARM_CLIENT_ID }}
+          tenant-id: ${{ vars.ARM_TENANT_ID }}
+          subscription-id: ${{ vars.ARM_SUBSCRIPTION_ID }}
 
       - name: Fetch Spacelift Credentials from Key Vault
         run: |
-          KV_ID=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
+          KV_ID=$(az keyvault secret show --vault-name "${{ vars.KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
           echo "::add-mask::$KV_ID"
           echo "SPACELIFT_API_KEY_ID=$KV_ID" >> $GITHUB_ENV
 
-          KV_SECRET=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
+          KV_SECRET=$(az keyvault secret show --vault-name "${{ vars.KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
           echo "::add-mask::$KV_SECRET"
           echo "SPACELIFT_API_KEY_SECRET=$KV_SECRET" >> $GITHUB_ENV
 
@@ -111,17 +111,17 @@ jobs:
       - name: Azure Login via OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.ARM_CLIENT_ID }}
+          tenant-id: ${{ vars.ARM_TENANT_ID }}
+          subscription-id: ${{ vars.ARM_SUBSCRIPTION_ID }}
 
       - name: Fetch Spacelift Credentials from Key Vault
         run: |
-          KV_ID=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
+          KV_ID=$(az keyvault secret show --vault-name "${{ vars.KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
           echo "::add-mask::$KV_ID"
           echo "SPACELIFT_API_KEY_ID=$KV_ID" >> $GITHUB_ENV
 
-          KV_SECRET=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
+          KV_SECRET=$(az keyvault secret show --vault-name "${{ vars.KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
           echo "::add-mask::$KV_SECRET"
           echo "SPACELIFT_API_KEY_SECRET=$KV_SECRET" >> $GITHUB_ENV
 

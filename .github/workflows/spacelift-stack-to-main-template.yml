@@ -13,21 +13,6 @@ on:
         required: false
         type: string
         default: 'main'
-      arm_client_id:
-        description: 'Azure Client ID (OIDC)'
-        required: false
-        type: string
-        default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
-      arm_tenant_id:
-        description: 'Azure Tenant ID'
-        required: false
-        type: string
-        default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
-      arm_subscription_id:
-        description: 'Azure Subscription ID'
-        required: false
-        type: string
-        default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
 
   workflow_dispatch:
     inputs:
@@ -41,21 +26,6 @@ on:
         required: false
         type: string
         default: 'main'
-      arm_client_id:
-        description: 'Azure Client ID (OIDC)'
-        required: false
-        type: string
-        default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
-      arm_tenant_id:
-        description: 'Azure Tenant ID'
-        required: false
-        type: string
-        default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
-      arm_subscription_id:
-        description: 'Azure Subscription ID'
-        required: false
-        type: string
-        default: 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c'
 
 permissions:
   id-token: write
@@ -69,20 +39,20 @@ jobs:
       - name: Azure Login via OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ inputs.arm_client_id }}
-          tenant-id: ${{ inputs.arm_tenant_id }}
-          subscription-id: ${{ inputs.arm_subscription_id }}
+          client-id: ${{ vars.ARM_CLIENT_ID }}
+          tenant-id: ${{ vars.ARM_TENANT_ID }}
+          subscription-id: ${{ vars.ARM_SUBSCRIPTION_ID }}
 
       - name: Fetch Spacelift Credentials from Key Vault
         run: |
           set -euo pipefail
           
-          RAW_ID=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
+          RAW_ID=$(az keyvault secret show --vault-name "${{ vars.KEY_VAULT_NAME }}" --name spacelift-api-key-id --query value -o tsv)
           KV_ID=$(echo "$RAW_ID" | tr -d '\r\n')
           echo "::add-mask::$KV_ID"
           echo "SPACELIFT_API_KEY_ID=$KV_ID" >> $GITHUB_ENV
 
-          RAW_SECRET=$(az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
+          RAW_SECRET=$(az keyvault secret show --vault-name "${{ vars.KEY_VAULT_NAME }}" --name spacelift-api-key-secret --query value -o tsv)
           KV_SECRET=$(echo "$RAW_SECRET" | tr -d '\r\n')
           echo "::add-mask::$KV_SECRET"
           echo "SPACELIFT_API_KEY_SECRET=$KV_SECRET" >> $GITHUB_ENV
