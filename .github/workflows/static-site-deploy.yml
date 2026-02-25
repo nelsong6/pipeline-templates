@@ -17,17 +17,17 @@ on:
         required: false
         type: string
         default: '20.x'
-      azure_client_id:
+      arm_client_id:
         description: 'Azure Client ID (OIDC)'
         required: false
         type: string
         default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
-      azure_tenant_id:
+      arm_tenant_id:
         description: 'Azure Tenant ID'
         required: false
         type: string
         default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
-      azure_subscription_id:
+      arm_subscription_id:
         description: 'Azure Subscription ID'
         required: false
         type: string
@@ -145,9 +145,9 @@ jobs:
     - name: Azure Login via OIDC
       uses: azure/login@v2
       with:
-        client-id: ${{ inputs.azure_client_id }}
-        tenant-id: ${{ inputs.azure_tenant_id }}
-        subscription-id: ${{ inputs.azure_subscription_id }}
+        client-id: ${{ inputs.arm_client_id }}
+        tenant-id: ${{ inputs.arm_tenant_id }}
+        subscription-id: ${{ inputs.arm_subscription_id }}
 
     # --- FRONTEND BUILD & DEPLOY ---
 

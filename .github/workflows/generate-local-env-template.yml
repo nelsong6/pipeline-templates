@@ -8,17 +8,17 @@ on:
         required: false
         type: string
         default: 'https://nelsong6.app.us.spacelift.io'
-      azure_client_id:
+      arm_client_id:
         description: 'Azure Client ID (OIDC)'
         required: false
         type: string
         default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
-      azure_tenant_id:
+      arm_tenant_id:
         description: 'Azure Tenant ID'
         required: false
         type: string
         default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
-      azure_subscription_id:
+      arm_subscription_id:
         description: 'Azure Subscription ID'
         required: false
         type: string
@@ -26,17 +26,17 @@ on:
 
   workflow_dispatch:
     inputs:
-      azure_client_id:
+      arm_client_id:
         description: 'Azure Client ID (OIDC)'
         required: false
         type: string
         default: '043b35c3-f5de-4578-acd2-8b8f4c78f461'
-      azure_tenant_id:
+      arm_tenant_id:
         description: 'Azure Tenant ID'
         required: false
         type: string
         default: '2236b5e4-81d2-4d82-bde5-17b1037999ea'
-      azure_subscription_id:
+      arm_subscription_id:
         description: 'Azure Subscription ID'
         required: false
         type: string
@@ -55,9 +55,9 @@ jobs:
       - name: Azure Login via OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ inputs.azure_client_id || '043b35c3-f5de-4578-acd2-8b8f4c78f461' }}
-          tenant-id: ${{ inputs.azure_tenant_id || '2236b5e4-81d2-4d82-bde5-17b1037999ea' }}
-          subscription-id: ${{ inputs.azure_subscription_id || 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c' }}
+          client-id: ${{ inputs.arm_client_id || '043b35c3-f5de-4578-acd2-8b8f4c78f461' }}
+          tenant-id: ${{ inputs.arm_tenant_id || '2236b5e4-81d2-4d82-bde5-17b1037999ea' }}
+          subscription-id: ${{ inputs.arm_subscription_id || 'aee0cbd2-8074-4001-b610-0f8edb4eaa3c' }}
 
       - name: Fetch Spacelift Credentials from Key Vault
         run: |
@@ -90,7 +90,7 @@ jobs:
           # Extract specific keys and decode them to raw text
           AUTH0_DOMAIN=$(echo "$INFRA_OUTPUTS" | jq -r '.[] | select(.id == "auth0_domain") | .value | fromjson')
           APP_CONFIG_ENDPOINT=$(echo "$INFRA_OUTPUTS" | jq -r '.[] | select(.id == "azure_app_config_endpoint") | .value | fromjson')
-          TENANT_ID=$(echo "$INFRA_OUTPUTS" | jq -r '.[] | select(.id == "azure_tenant_id") | .value | fromjson')
+          TENANT_ID=$(echo "$INFRA_OUTPUTS" | jq -r '.[] | select(.id == "arm_tenant_id") | .value | fromjson')
 
           echo "Fetching outputs from app stack: $APP_STACK_ID..."
           APP_OUTPUTS=$(spacectl stack outputs --id "$APP_STACK_ID" --output json)
