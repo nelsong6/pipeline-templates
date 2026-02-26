@@ -1,5 +1,4 @@
-# .github/workflows/ci-template.yml
-name: Universal CI Template
+name: Container app build
 
 on:
   workflow_call:
