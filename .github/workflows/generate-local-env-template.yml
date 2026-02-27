@@ -70,11 +70,13 @@ jobs:
 
           mkdir -p env-files/frontend env-files/backend
 
-          echo "Writing frontend/.env..."
-          echo "VITE_API_URL=http://localhost:3000" > env-files/frontend/.env
-          echo "VITE_AUTH0_DOMAIN=https://$AUTH0_DOMAIN" >> env-files/frontend/.env
-          echo "VITE_AUTH0_CLIENT_ID=$AUTH0_CLIENT_ID" >> env-files/frontend/.env
-          echo "VITE_AUTH0_AUDIENCE=$AUTH0_AUDIENCE" >> env-files/frontend/.env
+          echo "Writing frontend/config.js..."
+          echo "export const CONFIG = {" > env-files/frontend/config.js
+          echo "  auth0Domain: \"$AUTH0_DOMAIN\"," >> env-files/frontend/config.js
+          echo "  auth0ClientId: \"$AUTH0_CLIENT_ID\"," >> env-files/frontend/config.js
+          echo "  auth0Audience: \"$AUTH0_AUDIENCE\"," >> env-files/frontend/config.js
+          echo "  apiUrl: \"http://localhost:3000\"," >> env-files/frontend/config.js
+          echo "};" >> env-files/frontend/config.js
 
           echo "Writing backend/.env..."
           echo "AZURE_APP_CONFIG_ENDPOINT=$APP_CONFIG_ENDPOINT" > env-files/backend/.env
