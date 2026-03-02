@@ -1,0 +1,157 @@
+name: Shared Repository Linting
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: 'Directory to check'
+        required: false
+        type: string
+        default: '.'
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================================
+  # 📝 Newline Check
+  # ============================================================================
+  check-newlines:
+    name: Trailing Newlines
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Check for trailing newlines
+        run: |
+          FAILED=0
+          for file in $(git grep -Il ''); do
+            if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l)" -eq 0 ]; then
+              echo "❌ Missing trailing newline: $file"
+              FAILED=1
+            fi
+          done
+          if [ $FAILED -eq 1 ]; then
+            echo "Some files are missing a trailing newline. Please add an empty line to the end of the files listed above."
+            exit 1
+          fi
+
+  # ============================================================================
+  # 🛑 YAML Extension Check
+  # ============================================================================
+  check-yaml:
+    name: YAML Extensions
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Enforce .yml extension
+        run: |
+          YAML_FILES=$(git ls-files '*.yaml')
+          if [ -n "$YAML_FILES" ]; then
+            echo "❌ Found files with the '.yaml' extension. Please rename them to use '.yml' instead:"
+            echo "$YAML_FILES"
+            exit 1
+          fi
+
+  # ============================================================================
+  # 🔤 Filename Check (No Underscores)
+  # ============================================================================
+  check-underscores:
+    name: Filename Underscores
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Enforce no underscores in filenames
+        run: |
+          IGNORE_LIST=$(cat << 'EOF'
+          PULL_REQUEST_TEMPLATE
+          ISSUE_TEMPLATE
+          EOF
+          )
+          
+          IGNORE_PATTERN=$(echo "$IGNORE_LIST" | grep -v '^$' | paste -sd '|' -)
+          UNDERSCORE_FILES=$(git ls-files '*_*')
+          
+          if [ -z "$UNDERSCORE_FILES" ]; then
+            exit 0
+          fi
+          
+          if [ -n "$IGNORE_PATTERN" ]; then
+            FAILED_FILES=$(echo "$UNDERSCORE_FILES" | grep -vE "$IGNORE_PATTERN" || true)
+          else
+            FAILED_FILES="$UNDERSCORE_FILES"
+          fi
+          
+          if [ -n "$(echo "$FAILED_FILES" | grep -v '^$')" ]; then
+            echo "❌ Found files with underscores in their names. Please rename them to use hyphens (-) instead:"
+            echo "$FAILED_FILES"
+            exit 1
+          fi
+
+  # ============================================================================
+  # 📖 Spell Check
+  # ============================================================================
+  check-spelling:
+    name: Spell Check (Markdown)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Run cspell on Markdown
+        run: npx cspell "**/*.md" --no-progress
+
+  # ============================================================================
+  # 📋 Markdown Lint
+  # ============================================================================
+  check-markdown:
+    name: Markdown Formatting
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Run Markdown Lint
+        run: npx markdownlint-cli "**/*.md" --ignore "node_modules"
+
+  # ============================================================================
+  # 🏗️ OpenTofu Format
+  # ============================================================================
+  check-tofu:
+    name: OpenTofu Format
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 'latest'
+      - name: Run tofu fmt check
+        run: |
+          if tofu fmt -recursive -check; then
+            echo "✅ All OpenTofu files are properly formatted"
+          else
+            echo "❌ Format check failed. Please run 'tofu fmt -recursive' locally."
+            tofu fmt -recursive -check -diff || true
+            exit 1
+          fi
+
