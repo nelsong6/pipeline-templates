@@ -106,22 +106,19 @@ jobs:
           ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
         run: |
-          set +e
-          tofu plan -detailed-exitcode -out=tfplan ${{ inputs.tofu_vars }} > plan_output.txt 2>&1
-          EXIT_CODE=$?
-          set -e
-          cat plan_output.txt
+          tofu plan -out=tfplan ${{ inputs.tofu_vars }} 2>&1 | tee plan_output.txt
 
-          echo "tofu plan exited with code $EXIT_CODE"
-          if [ $EXIT_CODE -eq 0 ]; then
+          # Check plan for actual changes using tofu show
+          PLAN_JSON=$(tofu show -json tfplan)
+          RESOURCE_CHANGES=$(echo "$PLAN_JSON" | jq '[.resource_changes[]? | select(.change.actions | . != ["no-op"])] | length')
+
+          echo "Resource changes detected: $RESOURCE_CHANGES"
+          if [ "$RESOURCE_CHANGES" -gt 0 ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "### Infrastructure changes detected ($RESOURCE_CHANGES resources)" >> $GITHUB_STEP_SUMMARY
+          else
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "### No infrastructure changes detected" >> $GITHUB_STEP_SUMMARY
-          elif [ $EXIT_CODE -eq 2 ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "### Infrastructure changes detected" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "Plan failed"
-            exit 1
           fi
 
       - name: Post plan to PR
