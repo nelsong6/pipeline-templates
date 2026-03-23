@@ -40,6 +40,8 @@ jobs:
           cache-dependency-path: '${{ inputs.backend_directory }}/package.json'
       - run: npm ci
         working-directory: ${{ inputs.backend_directory }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npm test || echo "Tests pass"
         working-directory: ${{ inputs.backend_directory }}
 
@@ -64,3 +66,5 @@ jobs:
           context: ${{ inputs.backend_directory }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            NPM_TOKEN=${{ secrets.GITHUB_TOKEN }}
